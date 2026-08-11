@@ -485,7 +485,7 @@
          * ==========================================
          */
         async function geocodeAddress(address) {
-            const url = `https://api.openrouteservice.org/geocode/search?api_key=${ORS_API_KEY}&text=${encodeURIComponent(address)}&boundary.country=VN&size=1`;
+            const url = `https://api.openrouteservice.org/geocode/search?api_key=${ORS_API_KEY}&text=${encodeURIComponent(address)}&focus.point.lat=21.0285&focus.point.lon=105.8542&boundary.rect.min_lon=105.28&boundary.rect.min_lat=20.56&boundary.rect.max_lon=106.02&boundary.rect.max_lat=21.38&size=1`;
             const res = await fetch(url);
             if (!res.ok) throw new Error("API Key sai hoặc lỗi Geocoding");
             const data = await res.json();
@@ -753,7 +753,8 @@
 
         async function fetchAutocomplete(query) {
             try {
-                const res = await fetch(`https://api.openrouteservice.org/geocode/autocomplete?api_key=${ORS_API_KEY}&text=${encodeURIComponent(query)}&boundary.country=VN&size=5`);
+                const url = `https://api.openrouteservice.org/geocode/autocomplete?api_key=${ORS_API_KEY}&text=${encodeURIComponent(query)}&focus.point.lat=21.0285&focus.point.lon=105.8542&boundary.rect.min_lon=105.28&boundary.rect.min_lat=20.56&boundary.rect.max_lon=106.02&boundary.rect.max_lat=21.38&size=5`;
+                const res = await fetch(url);
                 if (!res.ok) {
                     if (res.status === 429) {
                         console.warn("Gợi ý địa điểm bị giới hạn (Rate Limit 429). Đang chờ...");
