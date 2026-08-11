@@ -1,0 +1,809 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tìm Văn Phòng Gần Nhất</title>
+    <meta name="description" content="Tìm văn phòng gần bạn nhất dựa trên khoảng cách lái xe thực tế">
+
+    <!-- Preconnect để tải nhanh hơn -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="preconnect" href="https://api.openrouteservice.org">
+    <link rel="preconnect" href="https://unpkg.com">
+
+    <!-- Google Fonts: Inter (chỉ tải các weight cần thiết) -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+
+    <style>
+        /* ===== THEME VARIABLES ===== */
+        :root {
+            --primary: #3b82f6;
+            --primary-dark: #2563eb;
+            --accent: #10b981;
+            --danger: #ef4444;
+            --favorite: #f59e0b;
+            --radius: 12px;
+        }
+
+        /* DARK THEME (default) */
+        [data-theme="dark"] {
+            --bg-body: #0f172a;
+            --bg-panel: rgba(30, 41, 59, 0.92);
+            --bg-card: rgba(51, 65, 85, 0.9);
+            --bg-input: rgba(15, 23, 42, 0.6);
+            --bg-ac: rgba(15, 23, 42, 0.95);
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+            --border-color: rgba(255, 255, 255, 0.1);
+            --shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            --tag-bg: rgba(15, 23, 42, 0.85);
+            --tag-color: #f1f5f9;
+        }
+
+        /* LIGHT THEME */
+        [data-theme="light"] {
+            --bg-body: #f1f5f9;
+            --bg-panel: rgba(255, 255, 255, 0.92);
+            --bg-card: rgba(241, 245, 249, 0.95);
+            --bg-input: rgba(255, 255, 255, 0.8);
+            --bg-ac: rgba(255, 255, 255, 0.98);
+            --text-primary: #0f172a;
+            --text-secondary: #64748b;
+            --border-color: rgba(0, 0, 0, 0.1);
+            --shadow: 0 8px 32px rgba(0, 0, 0, 0.08);
+            --tag-bg: rgba(255, 255, 255, 0.9);
+            --tag-color: #1e293b;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Inter', sans-serif; }
+
+        body {
+            background-color: var(--bg-body);
+            color: var(--text-primary);
+            height: 100vh;
+            display: flex;
+            flex-direction: row;
+            overflow: hidden;
+            transition: background-color 0.3s ease, color 0.3s ease;
+        }
+
+        /* ===== SIDEBAR ===== */
+        #sidebar {
+            width: 400px; min-width: 400px; height: 100%;
+            background: var(--bg-panel);
+            backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+            border-right: 1px solid var(--border-color);
+            padding: 24px;
+            display: flex; flex-direction: column; gap: 20px;
+            z-index: 1000;
+            box-shadow: var(--shadow);
+            overflow-y: auto;
+            transition: background 0.3s ease;
+        }
+
+        .header { display: flex; justify-content: space-between; align-items: flex-start; }
+        .header-text h1 {
+            font-size: 22px; font-weight: 700;
+            background: linear-gradient(135deg, #60a5fa, #a78bfa);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+            margin-bottom: 4px;
+        }
+        .header-text p { color: var(--text-secondary); font-size: 13px; }
+
+        /* Theme Toggle */
+        .theme-toggle {
+            width: 40px; height: 40px; border-radius: 50%;
+            background: var(--bg-input); border: 1px solid var(--border-color);
+            cursor: pointer; font-size: 18px;
+            display: flex; align-items: center; justify-content: center;
+            transition: all 0.3s ease; flex-shrink: 0;
+        }
+        .theme-toggle:hover { transform: scale(1.1); }
+
+        /* ===== INPUT ===== */
+        .input-group { display: flex; flex-direction: column; gap: 12px; }
+        .input-wrapper { position: relative; z-index: 50; }
+
+        input[type="text"] {
+            width: 100%; padding: 14px 16px;
+            border-radius: var(--radius); border: 1px solid var(--border-color);
+            background: var(--bg-input); color: var(--text-primary);
+            font-size: 15px; outline: none; transition: all 0.3s ease;
+        }
+        input[type="text"]:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2); }
+        input[type="text"]::placeholder { color: var(--text-secondary); }
+
+        /* Autocomplete */
+        #autocomplete-list {
+            position: absolute; top: 100%; left: 0; right: 0;
+            background: var(--bg-ac); backdrop-filter: blur(12px);
+            border: 1px solid var(--border-color); border-top: none;
+            border-radius: 0 0 var(--radius) var(--radius);
+            max-height: 240px; overflow-y: auto; z-index: 1100; display: none;
+        }
+        #autocomplete-list.visible { display: block; animation: fadeIn 0.2s ease; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+
+        .ac-item {
+            padding: 12px 16px; cursor: pointer;
+            display: flex; align-items: flex-start; gap: 10px;
+            transition: background 0.15s ease;
+            border-bottom: 1px solid var(--border-color);
+        }
+        .ac-item:last-child { border-bottom: none; }
+        .ac-item:hover, .ac-item.active { background: rgba(59, 130, 246, 0.12); }
+        .ac-icon { flex-shrink: 0; width: 20px; text-align: center; color: var(--text-secondary); margin-top: 2px; }
+        .ac-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+        .ac-name { font-size: 14px; font-weight: 500; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .ac-region { font-size: 12px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+        /* Buttons */
+        .buttons-row { display: flex; gap: 10px; }
+        button {
+            border: none; border-radius: var(--radius);
+            padding: 14px 16px; font-size: 15px; font-weight: 600;
+            cursor: pointer; transition: all 0.2s ease;
+            display: flex; align-items: center; justify-content: center; gap: 8px;
+        }
+        .btn-primary {
+            flex: 1; background: linear-gradient(135deg, var(--primary), #6366f1);
+            color: white; box-shadow: 0 4px 14px rgba(59, 130, 246, 0.4);
+        }
+        .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(59, 130, 246, 0.5); }
+        .btn-primary:active { transform: translateY(0); }
+        .btn-icon {
+            background: var(--bg-input); color: var(--text-primary);
+            border: 1px solid var(--border-color); width: 48px; padding: 0;
+        }
+        .btn-icon:hover { background: rgba(59, 130, 246, 0.1); }
+
+        .pulse-active { animation: pulse-green 1.5s infinite; background: rgba(16, 185, 129, 0.2); color: var(--accent); border-color: var(--accent); }
+        @keyframes pulse-green {
+            0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.4); }
+            70% { box-shadow: 0 0 0 10px rgba(16, 185, 129, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+        }
+
+        /* ===== RESULT CARDS ===== */
+        .result-card {
+            background: var(--bg-card); border: 1px solid var(--border-color);
+            border-radius: var(--radius); padding: 16px;
+            display: none; flex-direction: column; gap: 10px;
+            animation: slideInUp 0.4s ease forwards;
+            transition: background 0.3s ease;
+            cursor: pointer; position: relative;
+        }
+        .result-card:hover { border-color: var(--primary); }
+        .result-card.active-route { border-color: var(--primary); border-width: 2px; }
+        .result-card.fav-card.active-route { border-color: var(--favorite); }
+
+        @keyframes slideInUp { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
+
+        .result-label {
+            display: inline-flex; align-items: center; gap: 5px;
+            font-size: 11px; text-transform: uppercase; letter-spacing: 1px;
+            color: var(--text-secondary); font-weight: 600;
+            padding: 3px 8px; border-radius: 6px; width: fit-content;
+        }
+        .result-label.nearest { background: rgba(59, 130, 246, 0.12); color: var(--primary); }
+        .result-label.favorite { background: rgba(245, 158, 11, 0.12); color: var(--favorite); }
+
+        .result-card .office-name { font-size: 17px; font-weight: 700; color: var(--text-primary); }
+        .result-card .office-address { font-size: 13px; color: var(--text-secondary); margin-top: -4px; }
+        .stats-row {
+            display: flex; gap: 16px; margin-top: 4px; padding-top: 10px;
+            border-top: 1px solid var(--border-color);
+        }
+        .stat-box { flex: 1; display: flex; flex-direction: column; }
+        .stat-value { font-size: 22px; font-weight: 700; color: var(--accent); }
+        .stat-label { font-size: 11px; color: var(--text-secondary); }
+
+        /* Route Steps */
+        .route-steps { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border-color); }
+        .route-steps-title {
+            font-size: 11px; text-transform: uppercase; letter-spacing: 1px;
+            color: var(--text-secondary); font-weight: 600;
+            display: flex; align-items: center; gap: 6px;
+            cursor: pointer; user-select: none;
+        }
+        .route-steps-title .arrow { transition: transform 0.2s ease; font-size: 10px; }
+        .route-steps-title .arrow.open { transform: rotate(90deg); }
+        .steps-list { display: none; flex-direction: column; max-height: 180px; overflow-y: auto; }
+        .steps-list.visible { display: flex; }
+        .step-item {
+            display: flex; align-items: flex-start; gap: 10px; padding: 7px 0;
+            border-bottom: 1px solid var(--border-color); font-size: 12px; color: var(--text-secondary);
+        }
+        .step-item:last-child { border-bottom: none; }
+        .step-icon {
+            flex-shrink: 0; width: 22px; height: 22px; border-radius: 50%;
+            background: rgba(59, 130, 246, 0.12); display: flex;
+            align-items: center; justify-content: center; font-size: 11px;
+        }
+        .step-text { flex: 1; line-height: 1.4; }
+        .step-dist { flex-shrink: 0; font-size: 10px; color: var(--accent); font-weight: 600; margin-top: 2px; }
+
+        /* Route animation */
+        @keyframes dash { to { stroke-dashoffset: -30; } }
+        .route-line-animated { stroke-dasharray: 12, 8; animation: dash 0.8s linear infinite; }
+
+        /* ===== OFFICE MARKER LABELS ===== */
+        .office-label { background: transparent; border: none; box-shadow: none; }
+        .office-marker-wrap { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+        .office-pin {
+            width: 26px; height: 26px; background: var(--danger);
+            border-radius: 50% 50% 50% 0; transform: rotate(-45deg);
+            border: 2px solid white; box-shadow: 0 2px 6px rgba(0,0,0,0.35);
+            display: flex; align-items: center; justify-content: center;
+        }
+        .office-pin.fav { background: var(--favorite); }
+        .office-pin-inner { width: 7px; height: 7px; background: white; border-radius: 50%; transform: rotate(45deg); }
+        .office-tag {
+            background: var(--tag-bg); color: var(--tag-color);
+            font-size: 10px; font-weight: 600; padding: 2px 7px;
+            border-radius: 5px; white-space: nowrap;
+            border: 1px solid var(--border-color);
+            font-family: 'Inter', sans-serif; box-shadow: 0 1px 4px rgba(0,0,0,0.15);
+            transition: background 0.3s, color 0.3s;
+        }
+        .office-tag.fav-tag::before { content: '⭐ '; }
+
+        /* ===== MAP ===== */
+        #map { flex: 1; height: 100%; background-color: #e2e8f0; transition: background-color 0.3s ease; }
+        [data-theme="dark"] #map { background-color: #242f3e; }
+
+        /* ===== LOADING ===== */
+        #loading {
+            position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(15, 23, 42, 0.7); backdrop-filter: blur(4px);
+            z-index: 2000; display: none; justify-content: center;
+            align-items: center; flex-direction: column; gap: 16px;
+        }
+        .spinner { width: 40px; height: 40px; border: 4px solid rgba(255,255,255,0.1); border-left-color: var(--primary); border-radius: 50%; animation: spin 1s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* ===== TOAST ===== */
+        #toast {
+            position: fixed; bottom: 24px; left: 50%;
+            transform: translateX(-50%) translateY(100px);
+            background: var(--danger); color: white; padding: 12px 24px;
+            border-radius: 30px; font-size: 14px; font-weight: 500;
+            box-shadow: 0 4px 12px rgba(239,68,68,0.3);
+            transition: all 0.3s cubic-bezier(0.68,-0.55,0.265,1.55);
+            z-index: 3000; opacity: 0;
+        }
+        #toast.show { transform: translateX(-50%) translateY(0); opacity: 1; }
+
+        /* ===== RESPONSIVE ===== */
+        @media (max-width: 768px) {
+            body { flex-direction: column; }
+            #sidebar {
+                width: 100%; min-width: unset; height: auto;
+                max-height: 50vh; border-right: none;
+                border-bottom: 1px solid var(--border-color);
+                border-radius: 0 0 20px 20px;
+            }
+            #map { height: 50vh; }
+            .header-text h1 { font-size: 18px; }
+        }
+    </style>
+</head>
+
+<body>
+    <!-- SIDEBAR -->
+    <aside id="sidebar">
+        <div class="header">
+            <div class="header-text">
+                <h1>📍 Office Finder</h1>
+                <p>Tìm văn phòng gần nhất theo khoảng cách lái xe thực tế.</p>
+            </div>
+            <button class="theme-toggle" id="themeToggle" title="Chuyển giao diện sáng/tối">🌙</button>
+        </div>
+
+        <div class="input-group">
+            <div class="input-wrapper">
+                <input type="text" id="addressInput" placeholder="Nhập địa chỉ... (vd: Cầu Giấy, Hà Nội)" autocomplete="off">
+                <div id="autocomplete-list"></div>
+            </div>
+            <div class="buttons-row">
+                <button class="btn-primary" id="btnSearch">🔍 Tìm kiếm</button>
+                <button class="btn-icon" id="btnGPS" title="Sử dụng vị trí của tôi">🧭</button>
+            </div>
+        </div>
+
+        <!-- Kết quả: VP gần nhất tổng thể -->
+        <div class="result-card" id="nearestCard">
+            <div class="result-label nearest">📍 VP gần nhất</div>
+            <div class="office-name" id="nearestName">--</div>
+            <div class="office-address" id="nearestAddr">--</div>
+            <div class="stats-row">
+                <div class="stat-box"><div class="stat-value" id="nearestDist">0</div><div class="stat-label">km</div></div>
+                <div class="stat-box"><div class="stat-value" id="nearestTime">0</div><div class="stat-label">phút lái xe</div></div>
+            </div>
+            <div class="route-steps" id="nearestStepsWrap" style="display:none">
+                <div class="route-steps-title" data-target="nearestStepsList"><span class="arrow">▶</span> Chỉ dẫn đường đi</div>
+                <div class="steps-list" id="nearestStepsList"></div>
+            </div>
+        </div>
+
+        <!-- Kết quả: VP yêu thích gần nhất -->
+        <div class="result-card fav-card" id="favCard">
+            <div class="result-label favorite">⭐ VP yêu thích gần nhất</div>
+            <div class="office-name" id="favName">--</div>
+            <div class="office-address" id="favAddr">--</div>
+            <div class="stats-row">
+                <div class="stat-box"><div class="stat-value" id="favDist">0</div><div class="stat-label">km</div></div>
+                <div class="stat-box"><div class="stat-value" id="favTime">0</div><div class="stat-label">phút lái xe</div></div>
+            </div>
+            <div class="route-steps" id="favStepsWrap" style="display:none">
+                <div class="route-steps-title" data-target="favStepsList"><span class="arrow">▶</span> Chỉ dẫn đường đi</div>
+                <div class="steps-list" id="favStepsList"></div>
+            </div>
+        </div>
+    </aside>
+
+    <div id="map"></div>
+
+    <div id="loading">
+        <div class="spinner"></div>
+        <div style="font-weight:500;color:white" id="loadingText">Đang xử lý...</div>
+    </div>
+    <div id="toast">Có lỗi xảy ra!</div>
+
+    <!-- Leaflet JS (defer để không block render) -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+
+    <script>
+        /**
+         * ==========================================
+         * 1. CẤU HÌNH & DỮ LIỆU
+         * ==========================================
+         */
+        const ORS_API_KEY = "eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6IjI5YWVmNjEzZTUxYjRiMjM4MmYzMjU5ZTE5ZjkwMTk4IiwiaCI6Im11cm11cjY0In0=";
+
+        /**
+         * Danh sách văn phòng.
+         * favorite: true → Văn phòng yêu thích, được ưu tiên hiển thị kết quả riêng.
+         */
+        const offices = [
+            { id: 1,  name: "89 Đ. Cổ Linh",       lat: 21.0194611, lng: 105.9114404, address: "89 Đ. Cổ Linh, Hà Nội",       favorite: true },
+            { id: 2,  name: "47 Đ. Trần Khát Chân", lat: 21.0083581, lng: 105.864426,  address: "47 Đ. Trần Khát Chân, Hà Nội" },
+            { id: 3,  name: "87 Đ. Đại Cồ Việt",    lat: 21.0078319, lng: 105.8451526, address: "87 Đ. Đại Cồ Việt, Hà Nội" },
+            { id: 4,  name: "276 Đ. Nguyễn Văn Cừ",  lat: 21.0445876, lng: 105.8740187, address: "276 Đ. Nguyễn Văn Cừ, Hà Nội" },
+            { id: 5,  name: "180 P. Trung Kính",     lat: 21.0209462, lng: 105.7915495, address: "180 P. Trung Kính, Hà Nội",   favorite: true },
+            { id: 6,  name: "286 Nguyễn Trãi",       lat: 20.9921691, lng: 105.8043397, address: "286 Nguyễn Trãi, Hà Nội" },
+            { id: 7,  name: "245 Đ. Quang Trung",    lat: 20.9678202, lng: 105.7723311, address: "245 Đ. Quang Trung, Hà Nội" },
+            { id: 8,  name: "64 Đ. Võ Chí Công",     lat: 21.0499921, lng: 105.8047062, address: "64 Đ. Võ Chí Công, Hà Nội" },
+            { id: 9,  name: "130 Trần Đại Nghĩa",    lat: 20.9958397, lng: 105.8454416, address: "130 Trần Đại Nghĩa, Hà Nội", favorite: true },
+            { id: 10, name: "BT4",                   lat: 20.9662293, lng: 105.7989599, address: "BT4, Hà Nội" }
+        ];
+
+        /**
+         * ==========================================
+         * 2. THEME (SÁNG/TỐI)
+         * ==========================================
+         */
+        const TILE_DARK = 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png';
+        const TILE_LIGHT = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
+        let currentTileLayer = null;
+        let map, routeLayer, markersLayer, officesLayer;
+
+        function getTheme() {
+            try {
+                return localStorage.getItem('office-finder-theme') || 'dark';
+            } catch (e) {
+                return 'dark'; // Fallback nếu chạy file:/// bị chặn localStorage
+            }
+        }
+
+        function applyTheme(theme) {
+            document.documentElement.setAttribute('data-theme', theme);
+            document.getElementById('themeToggle').textContent = theme === 'dark' ? '☀️' : '🌙';
+            
+            try {
+                localStorage.setItem('office-finder-theme', theme);
+            } catch (e) {
+                console.warn('Không thể lưu theme vào localStorage');
+            }
+
+            // Đổi tile layer nếu map đã khởi tạo
+            if (map && currentTileLayer) {
+                map.removeLayer(currentTileLayer);
+                currentTileLayer = L.tileLayer(theme === 'dark' ? TILE_DARK : TILE_LIGHT, {
+                    maxZoom: 19,
+                    attribution: '© OpenStreetMap contributors © CARTO'
+                }).addTo(map);
+            }
+        }
+
+        // Áp dụng theme từ localStorage ngay lập tức (tránh flash)
+        applyTheme(getTheme());
+
+        document.getElementById('themeToggle').addEventListener('click', () => {
+            applyTheme(getTheme() === 'dark' ? 'light' : 'dark');
+        });
+
+        /**
+         * ==========================================
+         * 3. KHỞI TẠO BẢN ĐỒ
+         * ==========================================
+         */
+        let userIcon;
+
+        function createOfficeLabelIcon(name, isFav) {
+            return L.divIcon({
+                className: 'office-label',
+                html: `<div class="office-marker-wrap">
+                    <div class="office-pin${isFav ? ' fav' : ''}"><div class="office-pin-inner"></div></div>
+                    <div class="office-tag${isFav ? ' fav-tag' : ''}">${name}</div>
+                </div>`,
+                iconSize: [140, 48], iconAnchor: [70, 30]
+            });
+        }
+
+        function showAllOfficesOnMap() {
+            if (officesLayer) officesLayer.remove();
+            officesLayer = L.layerGroup().addTo(map);
+            offices.forEach(o => {
+                L.marker([o.lat, o.lng], { icon: createOfficeLabelIcon(o.name, o.favorite) })
+                    .addTo(officesLayer)
+                    .bindPopup(`<b>${o.favorite ? '⭐ ' : ''}${o.name}</b><br>${o.address}`);
+            });
+        }
+
+        function initMap() {
+            // Khởi tạo icon sau khi map load
+            userIcon = L.divIcon({
+                html: '<div style="background:#10b981;width:16px;height:16px;border-radius:50%;border:3px solid white;box-shadow:0 0 10px rgba(0,0,0,0.5)"></div>',
+                className: 'custom-user-icon', iconSize: [16, 16], iconAnchor: [8, 8]
+            });
+
+            map = L.map('map', { zoomControl: false }).setView([21.0285, 105.8542], 12);
+            L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+            const theme = getTheme();
+            currentTileLayer = L.tileLayer(theme === 'dark' ? TILE_DARK : TILE_LIGHT, {
+                maxZoom: 19,
+                attribution: '© OpenStreetMap contributors © CARTO'
+            }).addTo(map);
+
+            markersLayer = L.layerGroup().addTo(map);
+            routeLayer = L.layerGroup().addTo(map);
+            showAllOfficesOnMap();
+        }
+
+        /**
+         * ==========================================
+         * 4. API (OPENROUTESERVICE)
+         * ==========================================
+         */
+        async function geocodeAddress(address) {
+            const url = `https://api.openrouteservice.org/geocode/search?api_key=${ORS_API_KEY}&text=${encodeURIComponent(address)}&boundary.country=VN&size=1`;
+            const res = await fetch(url);
+            if (!res.ok) throw new Error("API Key sai hoặc lỗi Geocoding");
+            const data = await res.json();
+            if (!data.features?.length) throw new Error("Không tìm thấy địa chỉ này");
+            const c = data.features[0].geometry.coordinates;
+            return { lat: c[1], lng: c[0] };
+        }
+
+        async function getDirections(start, end) {
+            const url = `https://api.openrouteservice.org/v2/directions/driving-car?api_key=${ORS_API_KEY}&start=${start.lng},${start.lat}&end=${end.lng},${end.lat}`;
+            const res = await fetch(url);
+            if (!res.ok) throw new Error("Lỗi tính đường đi");
+            const data = await res.json();
+            if (!data.features?.length) throw new Error("Không tìm được đường đi");
+            const f = data.features[0];
+            return {
+                distance: f.properties.summary.distance,
+                duration: f.properties.summary.duration,
+                coordinates: f.geometry.coordinates,
+                steps: f.properties.segments?.[0]?.steps || []
+            };
+        }
+
+        function geoJsonToLatLngs(coords) { return coords.map(c => [c[1], c[0]]); }
+
+        function getStepIcon(type) {
+            return { 0:'⬅️',1:'➡️',2:'↩️',3:'↪️',4:'↖️',5:'↗️',6:'⬆️',7:'🔄',8:'🔄',9:'🔃',10:'🏁',11:'🚗',12:'↖️',13:'↗️' }[type] || '📍';
+        }
+
+        /**
+         * ==========================================
+         * 5. TÌM VĂN PHÒNG (GẦN NHẤT + YÊU THÍCH)
+         * ==========================================
+         * Gọi API song song cho tất cả văn phòng để tối ưu tốc độ.
+         * Trả về 2 kết quả: nearest overall + nearest favorite.
+         */
+        async function findNearestOffice(userCoords) {
+            showLoading("Đang tính toán tuyến đường...");
+
+            try {
+                // TÌM KIẾM TUẦN TỰ: OpenRouteService free tier giới hạn số request/giây
+                // Nếu dùng Promise.all sẽ bị lỗi 429 Too Many Requests
+                let nearest = null, nearestRoute = null, minDist = Infinity;
+                let favNearest = null, favRoute = null, favMinDist = Infinity;
+
+                for (const office of offices) {
+                    const route = await getDirections(userCoords, office);
+                    
+                    if (route.distance < minDist) {
+                        minDist = route.distance;
+                        nearest = office;
+                        nearestRoute = route;
+                    }
+                    if (office.favorite && route.distance < favMinDist) {
+                        favMinDist = route.distance;
+                        favNearest = office;
+                        favRoute = route;
+                    }
+
+                    // Tạm dừng 100ms giữa các request để tránh rate limit của ORS
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                }
+
+                // Xóa layers cũ (chỉ xóa route và marker của lần search trước)
+                markersLayer.clearLayers();
+                routeLayer.clearLayers();
+                // Không xóa officesLayer để giữ lại các VP khác trên bản đồ
+
+                // Đặt marker user
+                L.marker([userCoords.lat, userCoords.lng], { icon: userIcon })
+                    .addTo(markersLayer)
+                    .bindPopup(`<b>📍 Vị trí của bạn</b>`);
+                L.circleMarker([userCoords.lat, userCoords.lng], { radius: 6, color: '#fff', weight: 2, fillColor: '#10b981', fillOpacity: 1 }).addTo(routeLayer).bindTooltip('Xuất phát', { direction: 'top', offset: [0, -8] });
+
+                let bounds = L.latLngBounds();
+
+                // Hiển thị card VP gần nhất
+                if (nearest && nearestRoute) {
+                    populateCard('nearest', nearest, nearestRoute);
+                    document.getElementById('nearestCard').style.display = 'flex';
+                    bounds.extend(drawRouteSegment(nearest, nearestRoute, '#3b82f6'));
+                    document.getElementById('nearestCard').classList.add('active-route');
+                    document.getElementById('favCard').classList.remove('active-route');
+                }
+
+                // Hiển thị card VP yêu thích gần nhất
+                if (favNearest && favRoute) {
+                    populateCard('fav', favNearest, favRoute);
+                    document.getElementById('favCard').style.display = 'flex';
+
+                    // Nếu VP gần nhất != VP yêu thích → hiện 2 tuyến đường song song
+                    if (!nearest || nearest.id !== favNearest.id) {
+                        bounds.extend(drawRouteSegment(favNearest, favRoute, '#f59e0b'));
+                    } else {
+                        document.getElementById('favCard').style.display = 'none';
+                    }
+                }
+
+                if (bounds.isValid()) {
+                    map.fitBounds(bounds, { padding: [60, 60] });
+                }
+
+            } catch (error) {
+                showToast(error.message);
+            } finally {
+                hideLoading();
+            }
+        }
+
+        // Lưu data để click chuyển route
+        let cachedResults = {};
+
+        function populateCard(prefix, office, routeData) {
+            const distKm = (routeData.distance / 1000).toFixed(1);
+            const timeMin = Math.round(routeData.duration / 60);
+
+            document.getElementById(`${prefix}Name`).textContent = office.name;
+            document.getElementById(`${prefix}Addr`).textContent = office.address;
+            document.getElementById(`${prefix}Dist`).textContent = distKm;
+            document.getElementById(`${prefix}Time`).textContent = timeMin;
+
+            // Steps
+            const stepsWrap = document.getElementById(`${prefix}StepsWrap`);
+            const stepsList = document.getElementById(`${prefix}StepsList`);
+            stepsList.innerHTML = '';
+            if (routeData.steps.length) {
+                stepsWrap.style.display = 'block';
+                routeData.steps.forEach(step => {
+                    const d = step.distance >= 1000 ? (step.distance / 1000).toFixed(1) + ' km' : Math.round(step.distance) + ' m';
+                    const el = document.createElement('div');
+                    el.className = 'step-item';
+                    el.innerHTML = `<div class="step-icon">${getStepIcon(step.type)}</div><div class="step-text">${step.instruction}</div><div class="step-dist">${d}</div>`;
+                    stepsList.appendChild(el);
+                });
+            } else { stepsWrap.style.display = 'none'; }
+
+            // Cache data cho click
+            cachedResults[prefix] = { office, routeData };
+        }
+
+        /**
+         * ==========================================
+         * 6. VẼ TUYẾN ĐƯỜNG LÊN BẢN ĐỒ
+         * ==========================================
+         */
+        function drawRouteSegment(office, routeData, color) {
+            // Marker office (đè lên marker mặc định để hiện thêm khoảng cách)
+            const officeMarker = L.marker([office.lat, office.lng], {
+                icon: createOfficeLabelIcon(office.name, office.favorite)
+            }).addTo(markersLayer);
+            
+            const distKm = (routeData.distance / 1000).toFixed(1);
+            const timeMin = Math.round(routeData.duration / 60);
+            officeMarker.bindPopup(`<b>${office.favorite ? '⭐ ' : '🏢 '}${office.name}</b><br>${office.address}<br><span style="color:${color};font-weight:600">${distKm} km · ${timeMin} phút</span>`).openPopup();
+
+            // Polyline
+            const latLngs = geoJsonToLatLngs(routeData.coordinates);
+
+            // Viền nền
+            L.polyline(latLngs, { color: color === '#f59e0b' ? '#78350f' : '#1e3a5f', weight: 9, opacity: 0.35, lineJoin: 'round', lineCap: 'round' }).addTo(routeLayer);
+
+            // Đường chính
+            const main = L.polyline(latLngs, { color, weight: 5, opacity: 0.9, lineJoin: 'round', lineCap: 'round', className: 'route-line-animated' }).addTo(routeLayer);
+
+            // Start/End markers (Đích đến)
+            L.circleMarker(latLngs[latLngs.length - 1], { radius: 6, color: '#fff', weight: 2, fillColor: color, fillOpacity: 1 }).addTo(routeLayer).bindTooltip('Đến nơi', { direction: 'top', offset: [0, -8] });
+
+            return main.getBounds();
+        }
+
+        /**
+         * ==========================================
+         * 7. SỰ KIỆN
+         * ==========================================
+         */
+        // Click card để làm nổi bật
+        document.getElementById('nearestCard').addEventListener('click', (e) => {
+            if (e.target.closest('.route-steps-title')) return; // Không trigger khi toggle steps
+            document.getElementById('nearestCard').classList.add('active-route');
+            document.getElementById('favCard').classList.remove('active-route');
+        });
+
+        document.getElementById('favCard').addEventListener('click', (e) => {
+            if (e.target.closest('.route-steps-title')) return;
+            document.getElementById('favCard').classList.add('active-route');
+            document.getElementById('nearestCard').classList.remove('active-route');
+        });
+
+        // Toggle steps (generic)
+        document.querySelectorAll('.route-steps-title').forEach(el => {
+            el.addEventListener('click', () => {
+                const list = document.getElementById(el.dataset.target);
+                const arrow = el.querySelector('.arrow');
+                list.classList.toggle('visible');
+                arrow.classList.toggle('open');
+            });
+        });
+
+        // Tìm kiếm
+        document.getElementById('btnSearch').addEventListener('click', async () => {
+            const address = document.getElementById('addressInput').value.trim();
+            if (!address) { showToast("Vui lòng nhập địa chỉ"); return; }
+            showLoading("Đang tìm tọa độ...");
+            try {
+                const coords = await geocodeAddress(address);
+                await findNearestOffice(coords);
+            } catch (err) { showToast(err.message); hideLoading(); }
+        });
+
+        // Enter
+        document.getElementById('addressInput').addEventListener('keypress', e => {
+            if (e.key === 'Enter') { closeAutocomplete(); document.getElementById('btnSearch').click(); }
+        });
+
+        // GPS
+        document.getElementById('btnGPS').addEventListener('click', () => {
+            const btn = document.getElementById('btnGPS');
+            btn.classList.add('pulse-active');
+            if (!navigator.geolocation) { btn.classList.remove('pulse-active'); showToast("Trình duyệt không hỗ trợ Geolocation"); return; }
+            navigator.geolocation.getCurrentPosition(
+                async pos => {
+                    btn.classList.remove('pulse-active');
+                    const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+                    document.getElementById('addressInput').value = `Vị trí hiện tại (${coords.lat.toFixed(4)}, ${coords.lng.toFixed(4)})`;
+                    await findNearestOffice(coords);
+                },
+                err => { btn.classList.remove('pulse-active'); showToast(err.code === 1 ? "Bạn đã từ chối quyền truy cập vị trí" : "Lỗi lấy vị trí"); },
+                { enableHighAccuracy: true, timeout: 10000 }
+            );
+        });
+
+        /**
+         * ==========================================
+         * 8. AUTOCOMPLETE
+         * ==========================================
+         */
+        let acTimeout, acActiveIndex = -1;
+        const addressInput = document.getElementById('addressInput');
+        const acList = document.getElementById('autocomplete-list');
+
+        addressInput.addEventListener('input', () => {
+            clearTimeout(acTimeout);
+            const q = addressInput.value.trim();
+            if (q.length < 2) { closeAutocomplete(); return; }
+            // Tăng debounce lên 600ms để tránh bị rate limit (429) khi gõ phím
+            acTimeout = setTimeout(() => fetchAutocomplete(q), 600);
+        });
+
+        addressInput.addEventListener('keydown', e => {
+            const items = acList.querySelectorAll('.ac-item');
+            if (!items.length) return;
+            if (e.key === 'ArrowDown') { e.preventDefault(); acActiveIndex = Math.min(acActiveIndex + 1, items.length - 1); highlightAcItem(items); }
+            else if (e.key === 'ArrowUp') { e.preventDefault(); acActiveIndex = Math.max(acActiveIndex - 1, 0); highlightAcItem(items); }
+            else if (e.key === 'Enter' && acActiveIndex >= 0) { e.preventDefault(); items[acActiveIndex].click(); }
+            else if (e.key === 'Escape') { closeAutocomplete(); }
+        });
+
+        function highlightAcItem(items) {
+            items.forEach(i => i.classList.remove('active'));
+            if (acActiveIndex >= 0 && acActiveIndex < items.length) {
+                items[acActiveIndex].classList.add('active');
+                items[acActiveIndex].scrollIntoView({ block: 'nearest' });
+            }
+        }
+
+        async function fetchAutocomplete(query) {
+            try {
+                const res = await fetch(`https://api.openrouteservice.org/geocode/autocomplete?api_key=${ORS_API_KEY}&text=${encodeURIComponent(query)}&boundary.country=VN&size=5`);
+                if (!res.ok) {
+                    if (res.status === 429) {
+                        console.warn("Gợi ý địa điểm bị giới hạn (Rate Limit 429). Đang chờ...");
+                    }
+                    return;
+                }
+                const data = await res.json();
+                renderAutocomplete(data.features || []);
+            } catch (e) { console.error('Autocomplete Error:', e); }
+        }
+
+        function renderAutocomplete(features) {
+            acList.innerHTML = ''; acActiveIndex = -1;
+            if (!features.length) { closeAutocomplete(); return; }
+            features.forEach(f => {
+                const p = f.properties, name = p.name || p.label;
+                const region = [p.locality, p.region, p.country].filter(Boolean).join(', ');
+                const coords = f.geometry.coordinates;
+                const item = document.createElement('div');
+                item.className = 'ac-item';
+                item.innerHTML = `<div class="ac-icon">📍</div><div class="ac-text"><div class="ac-name">${name}</div><div class="ac-region">${region}</div></div>`;
+                item.addEventListener('click', () => {
+                    addressInput.value = p.label || name;
+                    closeAutocomplete();
+                    findNearestOffice({ lat: coords[1], lng: coords[0] });
+                });
+                acList.appendChild(item);
+            });
+            acList.classList.add('visible');
+        }
+
+        function closeAutocomplete() { acList.classList.remove('visible'); acList.innerHTML = ''; acActiveIndex = -1; }
+        document.addEventListener('click', e => { if (!addressInput.contains(e.target) && !acList.contains(e.target)) closeAutocomplete(); });
+
+        /**
+         * ==========================================
+         * 9. TIỆN ÍCH UI
+         * ==========================================
+         */
+        let toastTimeout;
+        function showToast(msg) {
+            const t = document.getElementById('toast'); t.textContent = msg; t.classList.add('show');
+            clearTimeout(toastTimeout); toastTimeout = setTimeout(() => t.classList.remove('show'), 3000);
+        }
+        function showLoading(txt = "Đang xử lý...") { document.getElementById('loadingText').textContent = txt; document.getElementById('loading').style.display = 'flex'; }
+        function hideLoading() { document.getElementById('loading').style.display = 'none'; }
+
+        // Khởi tạo
+        window.onload = initMap;
+    </script>
+</body>
+
+</html>
