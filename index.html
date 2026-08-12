@@ -11,6 +11,9 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="preconnect" href="https://api.openrouteservice.org">
+    <link rel="preconnect" href="https://autocomplete.search.hereapi.com">
+    <link rel="preconnect" href="https://lookup.search.hereapi.com">
+    <link rel="preconnect" href="https://geocode.search.hereapi.com">
     <link rel="preconnect" href="https://unpkg.com">
 
     <!-- Google Fonts: Inter (chỉ tải các weight cần thiết) -->
@@ -367,6 +370,7 @@
          * ==========================================
          */
         const ORS_API_KEY = "eyJvcmciOiI1YjNjZTM1OTc4NTExMTAwMDFjZjYyNDgiLCJpZCI6IjI5YWVmNjEzZTUxYjRiMjM4MmYzMjU5ZTE5ZjkwMTk4IiwiaCI6Im11cm11cjY0In0=";
+        const HERE_API_KEY = "cqqAhLX6JN_kbqNZY-QSGy69W8SzPbQh1sySRUaxRnM"; // Thay bằng API Key từ developer.here.com
 
         /**
          * Danh sách văn phòng.
@@ -484,14 +488,31 @@
          * 4. API (OPENROUTESERVICE)
          * ==========================================
          */
+        /**
+         * Geocode địa chỉ bằng HERE Geocode API
+         * Dùng khi user nhấn "Tìm kiếm" mà không chọn gợi ý từ dropdown
+         */
         async function geocodeAddress(address) {
-            const url = `https://api.openrouteservice.org/geocode/search?api_key=${ORS_API_KEY}&text=${encodeURIComponent(address)}&focus.point.lat=21.0285&focus.point.lon=105.8542&boundary.rect.min_lon=105.28&boundary.rect.min_lat=20.56&boundary.rect.max_lon=106.02&boundary.rect.max_lat=21.38&boundary.country=VN&size=1`;
+            const url = `https://geocode.search.hereapi.com/v1/geocode?apiKey=${HERE_API_KEY}&q=${encodeURIComponent(address)}&at=21.0285,105.8542&in=countryCode:VNM&limit=1&lang=vi`;
             const res = await fetch(url);
-            if (!res.ok) throw new Error("API Key sai hoặc lỗi Geocoding");
+            if (!res.ok) throw new Error("API Key HERE sai hoặc lỗi Geocoding");
             const data = await res.json();
-            if (!data.features?.length) throw new Error("Không tìm thấy địa chỉ này");
-            const c = data.features[0].geometry.coordinates;
-            return { lat: c[1], lng: c[0] };
+            if (!data.items?.length) throw new Error("Không tìm thấy địa chỉ này");
+            const pos = data.items[0].position;
+            return { lat: pos.lat, lng: pos.lng };
+        }
+
+        /**
+         * Lấy tọa độ từ HERE ID bằng Lookup API
+         * HERE Autocomplete chỉ trả về id + address, cần lookup để lấy position
+         */
+        async function hereLookup(hereId) {
+            const url = `https://lookup.search.hereapi.com/v1/lookup?apiKey=${HERE_API_KEY}&id=${encodeURIComponent(hereId)}`;
+            const res = await fetch(url);
+            if (!res.ok) throw new Error("Lỗi tra cứu vị trí");
+            const data = await res.json();
+            if (!data.position) throw new Error("Không tìm thấy tọa độ cho địa chỉ này");
+            return { lat: data.position.lat, lng: data.position.lng };
         }
 
         async function getDirections(start, end) {
@@ -730,8 +751,8 @@
             clearTimeout(acTimeout);
             const q = addressInput.value.trim();
             if (q.length < 2) { closeAutocomplete(); return; }
-            // Tăng debounce lên 600ms để tránh bị rate limit (429) khi gõ phím
-            acTimeout = setTimeout(() => fetchAutocomplete(q), 600);
+            // HERE API không bị rate limit nghiêm ngặt → debounce 250ms cho trải nghiệm mượt
+            acTimeout = setTimeout(() => fetchAutocomplete(q), 250);
         });
 
         addressInput.addEventListener('keydown', e => {
@@ -751,37 +772,84 @@
             }
         }
 
+        /**
+         * Áp dụng highlight cho text dựa trên ranges từ HERE API
+         * Giúp bold các phần matching query trong dropdown gợi ý
+         */
+        function applyHighlights(text, ranges) {
+            if (!ranges?.length || !text) return text;
+            // Sắp xếp ranges theo start giảm dần để chèn từ cuối → đầu (tránh lệch index)
+            const sorted = [...ranges].sort((a, b) => b.start - a.start);
+            let result = text;
+            sorted.forEach(r => {
+                result = result.slice(0, r.start) + '<b>' + result.slice(r.start, r.end) + '</b>' + result.slice(r.end);
+            });
+            return result;
+        }
+
+        /**
+         * Lấy icon phù hợp dựa trên resultType từ HERE API
+         */
+        function getResultIcon(resultType) {
+            const icons = {
+                'houseNumber': '🏠', 'street': '🛣️', 'locality': '🏙️',
+                'administrativeArea': '🗺️', 'place': '📍', 'intersection': '🔀',
+                'chainQuery': '🏢', 'categoryQuery': '📂'
+            };
+            return icons[resultType] || '📍';
+        }
+
         async function fetchAutocomplete(query) {
             try {
-                const url = `https://api.openrouteservice.org/geocode/autocomplete?api_key=${ORS_API_KEY}&text=${encodeURIComponent(query)}&focus.point.lat=21.0285&focus.point.lon=105.8542&boundary.rect.min_lon=105.28&boundary.rect.min_lat=20.56&boundary.rect.max_lon=106.02&boundary.rect.max_lat=21.38&boundary.country=VN&size=5`;
+                const url = `https://autocomplete.search.hereapi.com/v1/autocomplete?apiKey=${HERE_API_KEY}&q=${encodeURIComponent(query)}&at=21.0285,105.8542&in=countryCode:VNM&limit=7&lang=vi`;
                 const res = await fetch(url);
                 if (!res.ok) {
-                    if (res.status === 429) {
-                        console.warn("Gợi ý địa điểm bị giới hạn (Rate Limit 429). Đang chờ...");
-                    }
+                    console.error(`HERE Autocomplete Error: ${res.status}`);
                     return;
                 }
                 const data = await res.json();
-                renderAutocomplete(data.features || []);
+                renderAutocomplete(data.items || [], query);
             } catch (e) { console.error('Autocomplete Error:', e); }
         }
 
-        function renderAutocomplete(features) {
+        function renderAutocomplete(items, query) {
             acList.innerHTML = ''; acActiveIndex = -1;
-            if (!features.length) { closeAutocomplete(); return; }
-            features.forEach(f => {
-                const p = f.properties, name = p.name || p.label;
-                const region = [p.locality, p.region, p.country].filter(Boolean).join(', ');
-                const coords = f.geometry.coordinates;
-                const item = document.createElement('div');
-                item.className = 'ac-item';
-                item.innerHTML = `<div class="ac-icon">📍</div><div class="ac-text"><div class="ac-name">${name}</div><div class="ac-region">${region}</div></div>`;
-                item.addEventListener('click', () => {
-                    addressInput.value = p.label || name;
+            if (!items.length) { closeAutocomplete(); return; }
+            items.forEach(item => {
+                const addr = item.address || {};
+                const title = item.title || '';
+                const icon = getResultIcon(item.resultType);
+
+                // Áp dụng highlight nếu có
+                const titleHighlights = item.highlights?.title;
+                const displayName = applyHighlights(title, titleHighlights);
+
+                // Tạo dòng phụ từ address components
+                const region = [addr.city, addr.state, addr.countryName].filter(Boolean).join(', ');
+                const labelHighlights = item.highlights?.address?.label;
+                const displayRegion = labelHighlights
+                    ? applyHighlights(addr.label || region, labelHighlights)
+                    : region;
+
+                const el = document.createElement('div');
+                el.className = 'ac-item';
+                el.innerHTML = `<div class="ac-icon">${icon}</div><div class="ac-text"><div class="ac-name">${displayName}</div><div class="ac-region">${displayRegion}</div></div>`;
+
+                el.addEventListener('click', async () => {
+                    addressInput.value = addr.label || title;
                     closeAutocomplete();
-                    findNearestOffice({ lat: coords[1], lng: coords[0] });
+
+                    // HERE Autocomplete không trả tọa độ → cần gọi Lookup API
+                    showLoading("Đang tra cứu vị trí...");
+                    try {
+                        const coords = await hereLookup(item.id);
+                        await findNearestOffice(coords);
+                    } catch (err) {
+                        showToast(err.message);
+                        hideLoading();
+                    }
                 });
-                acList.appendChild(item);
+                acList.appendChild(el);
             });
             acList.classList.add('visible');
         }
