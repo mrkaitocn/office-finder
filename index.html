@@ -410,7 +410,7 @@
             { id: 6,  name: "286 Nguyễn Trãi",       lat: 20.9921691, lng: 105.8043397, address: "286 Nguyễn Trãi, Hà Nội" },
             { id: 7,  name: "245 Đ. Quang Trung",    lat: 20.9678202, lng: 105.7723311, address: "245 Đ. Quang Trung, Hà Nội" },
             { id: 8,  name: "64 Đ. Võ Chí Công",     lat: 21.0499921, lng: 105.8047062, address: "64 Đ. Võ Chí Công, Hà Nội" },
-            { id: 9,  name: "130 Trần Đại Nghĩa",    lat: 20.9958397, lng: 105.8454416, address: "130 Trần Đại Nghĩa, Hà Nội", favorite: true },
+            { id: 9,  name: "130 Trần Đại Nghĩa",    lat: 20.9958397, lng: 105.8454416, address: "130 Trần Đại Nghĩa, Hà Nội" },
             { id: 10, name: "VP Tân Triều",                   lat: 20.9662293, lng: 105.7989599, address: "BT4, Yên Xá, Hà Nội" }
         ];
 
@@ -581,38 +581,71 @@
             return { 0:'⬅️',1:'➡️',2:'↩️',3:'↪️',4:'↖️',5:'↗️',6:'⬆️',7:'🔄',8:'🔄',9:'🔃',10:'🏁',11:'🚗',12:'↖️',13:'↗️' }[type] || '📍';
         }
 
+        async function getDistanceMatrix(userCoords, offices) {
+            const locations = [ [userCoords.lng, userCoords.lat] ];
+            offices.forEach(o => locations.push([o.lng, o.lat]));
+            
+            const res = await fetch('https://api.openrouteservice.org/v2/matrix/driving-car', {
+                method: 'POST',
+                headers: {
+                    'Authorization': ORS_API_KEY,
+                    'Content-Type': 'application/json; charset=utf-8'
+                },
+                body: JSON.stringify({
+                    locations: locations,
+                    metrics: ["distance"],
+                    sources: [0]
+                })
+            });
+            if (!res.ok) throw new Error("Lỗi gọi Matrix API");
+            const data = await res.json();
+            if (!data.distances || !data.distances[0]) throw new Error("Matrix API không trả về dữ liệu");
+            return data.distances[0]; // Trả về mảng khoảng cách từ user (index 0) đến tất cả các điểm
+        }
+
         /**
          * ==========================================
          * 5. TÌM VĂN PHÒNG (GẦN NHẤT + YÊU THÍCH)
          * ==========================================
-         * Gọi API song song cho tất cả văn phòng để tối ưu tốc độ.
-         * Trả về 2 kết quả: nearest overall + nearest favorite.
+         * Tối ưu hóa: Dùng Matrix API 1 lần cho tất cả, sau đó mới gọi Directions API
          */
         async function findNearestOffice(userCoords) {
-            showLoading("Đang tính toán tuyến đường...");
+            showLoading("Đang tính toán khoảng cách...");
 
             try {
-                // TÌM KIẾM TUẦN TỰ: OpenRouteService free tier giới hạn số request/giây
-                // Nếu dùng Promise.all sẽ bị lỗi 429 Too Many Requests
-                let nearest = null, nearestRoute = null, minDist = Infinity;
-                let favNearest = null, favRoute = null, favMinDist = Infinity;
-
-                for (const office of offices) {
-                    const route = await getDirections(userCoords, office);
+                // 1. Gọi Matrix API
+                const distances = await getDistanceMatrix(userCoords, offices);
+                
+                let nearest = null, minDist = Infinity;
+                let favNearest = null, favMinDist = Infinity;
+                
+                // Phân tích kết quả (bỏ qua index 0 vì là khoảng cách từ user -> user)
+                offices.forEach((office, index) => {
+                    const dist = distances[index + 1];
+                    if (dist === null || dist === undefined) return;
                     
-                    if (route.distance < minDist) {
-                        minDist = route.distance;
+                    if (dist < minDist) {
+                        minDist = dist;
                         nearest = office;
-                        nearestRoute = route;
                     }
-                    if (office.favorite && route.distance < favMinDist) {
-                        favMinDist = route.distance;
+                    if (office.favorite && dist < favMinDist) {
+                        favMinDist = dist;
                         favNearest = office;
-                        favRoute = route;
                     }
+                });
 
-                    // Tạm dừng 100ms giữa các request để tránh rate limit của ORS
-                    await new Promise(resolve => setTimeout(resolve, 100));
+                if (!nearest) throw new Error("Không thể tìm được đường lái xe đến các văn phòng.");
+
+                showLoading("Đang tải chỉ dẫn đường đi...");
+
+                // 2. Gọi Directions API để lấy chi tiết đường (Chỉ 1 hoặc 2 request)
+                let nearestRoute = await getDirections(userCoords, nearest);
+                let favRoute = null;
+                
+                if (favNearest && favNearest.id !== nearest.id) {
+                    favRoute = await getDirections(userCoords, favNearest);
+                } else if (favNearest && favNearest.id === nearest.id) {
+                    favRoute = nearestRoute;
                 }
 
                 // Xóa layers cũ (chỉ xóa route và marker của lần search trước)
