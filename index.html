@@ -878,25 +878,37 @@
             
             const parts = [];
             
-            // houseNumber + street
+            // 1. houseNumber + street
             let streetPart = '';
             if (address.houseNumber) streetPart += address.houseNumber;
             if (address.street) streetPart += (streetPart ? ' ' : '') + address.street;
             if (streetPart) parts.push(streetPart);
 
-            // subdistrict (phường/xã)
-            if (address.subdistrict && address.subdistrict !== streetPart) parts.push(address.subdistrict);
-            // district (quận/huyện)
+            // 2. Xã/Phường (district/subdistrict trong HERE API)
+            // Thường Google Maps format có thể bỏ qua phường, nhưng ta giữ lại nếu có để chi tiết
             if (address.district && address.district !== streetPart) parts.push(address.district);
+            else if (address.subdistrict && address.subdistrict !== streetPart) parts.push(address.subdistrict);
             
-            // City + Postal code
-            let cityPart = address.city || address.state || '';
-            if (cityPart && address.postalCode) {
-                cityPart += ' ' + address.postalCode;
+            // 3. Quận/Huyện (city trong HERE API)
+            if (address.city && address.city !== streetPart) {
+                // Tùy chọn: Xóa chữ "Quận "/"Huyện " để giống hệt Google Maps, vd "Quận Ba Đình" -> "Ba Đình"
+                let cityLabel = address.city.replace(/^(Quận|Huyện|Thị xã)\s+/i, '');
+                parts.push(cityLabel);
             }
-            if (cityPart) parts.push(cityPart);
+            
+            // 4. Tỉnh/Thành phố (county trong HERE API) + Postal code
+            let provincePart = address.county || address.state || '';
+            if (provincePart && address.postalCode) {
+                provincePart += ' ' + address.postalCode;
+            }
+            if (provincePart) {
+                parts.push(provincePart);
+            } else if (address.postalCode && parts.length > 0) {
+                // Nếu không có province mà có mã bưu điện, gán tạm vào thành phần trước đó
+                parts[parts.length - 1] += ' ' + address.postalCode;
+            }
 
-            // Country
+            // 5. Quốc gia
             if (address.countryName) parts.push(address.countryName);
 
             // Fallback: nếu không ghép được gì, dùng label gốc từ HERE
