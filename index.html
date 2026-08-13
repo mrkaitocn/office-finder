@@ -114,7 +114,7 @@
         .input-wrapper { position: relative; z-index: 50; }
 
         input[type="text"] {
-            width: 100%; padding: 14px 48px 14px 16px; /* padding-right 48px for copy button */
+            width: 100%; padding: 14px 85px 14px 16px; /* padding-right 85px for 2 buttons */
             border-radius: var(--radius); border: 1px solid var(--border-color);
             background: var(--bg-input); color: var(--text-primary);
             font-size: 15px; outline: none; transition: all 0.3s ease;
@@ -122,19 +122,23 @@
         input[type="text"]:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2); }
         input[type="text"]::placeholder { color: var(--text-secondary); }
 
-        /* Copy button inside input */
-        #btnCopy {
-            position: absolute; right: 8px; top: 50%;
+        /* Nút phụ trợ trong ô input */
+        .input-actions {
+            position: absolute; right: 6px; top: 50%;
             transform: translateY(-50%);
-            background: var(--bg-card); border: 1px solid var(--border-color);
-            border-radius: 8px; width: 34px; height: 34px;
-            cursor: pointer; font-size: 16px;
-            display: none; align-items: center; justify-content: center;
-            transition: all 0.2s ease; color: var(--text-secondary);
-            z-index: 10;
+            display: flex; gap: 4px; z-index: 10;
         }
-        #btnCopy:hover { background: rgba(59,130,246,0.15); color: var(--primary); }
-        #btnCopy.copied { background: rgba(16,185,129,0.15); color: var(--accent); }
+        .icon-btn {
+            background: var(--bg-card); border: 1px solid var(--border-color);
+            border-radius: 6px; width: 34px; height: 34px;
+            cursor: pointer; font-size: 14px;
+            display: flex; align-items: center; justify-content: center;
+            transition: all 0.2s ease; color: var(--text-secondary);
+        }
+        .icon-btn:hover { background: rgba(59,130,246,0.15); color: var(--primary); }
+        .btn-copy.copied { background: rgba(16,185,129,0.15); color: var(--accent); border-color: var(--accent); }
+        .btn-clear { display: none; }
+        .btn-clear:hover { background: rgba(239,68,68,0.15); color: var(--danger); border-color: var(--danger); }
 
         /* Autocomplete */
         #autocomplete-list {
@@ -326,7 +330,10 @@
         <div class="input-group">
             <div class="input-wrapper">
                 <input type="text" id="addressInput" placeholder="Nhập địa chỉ... (vd: Cầu Giấy, Hà Nội)" autocomplete="off">
-                <button id="btnCopy" title="Sao chép địa chỉ">📋</button>
+                <div class="input-actions">
+                    <button class="icon-btn btn-clear" id="btnClear" title="Xóa">✖</button>
+                    <button class="icon-btn btn-copy" id="btnCopy" title="Sao chép địa chỉ">📋</button>
+                </div>
                 <div id="autocomplete-list"></div>
             </div>
             <div class="buttons-row">
@@ -789,7 +796,7 @@
 
         addressInput.addEventListener('input', () => {
             clearTimeout(acTimeout);
-            document.getElementById('btnCopy').style.display = 'none';
+            document.getElementById('btnClear').style.display = addressInput.value.length > 0 ? 'flex' : 'none';
             const q = addressInput.value.trim();
             if (q.length < 2) { closeAutocomplete(); return; }
             // HERE API không bị rate limit nghiêm ngặt → debounce 250ms cho trải nghiệm mượt
@@ -881,14 +888,13 @@
          */
         function showCopyButton(text) {
             const btn = document.getElementById('btnCopy');
-            btn.style.display = 'flex';
             btn.dataset.copyText = text;
         }
 
         document.getElementById('btnCopy').addEventListener('click', async (e) => {
             e.stopPropagation();
             const btn = e.currentTarget;
-            const text = btn.dataset.copyText;
+            const text = btn.dataset.copyText || document.getElementById('addressInput').value;
             if (!text) return;
             
             let success = false;
@@ -920,6 +926,16 @@
                     btn.classList.remove('copied');
                 }, 2000);
             }
+        });
+
+        document.getElementById('btnClear').addEventListener('click', (e) => {
+            e.stopPropagation();
+            const input = document.getElementById('addressInput');
+            input.value = '';
+            input.focus();
+            closeAutocomplete();
+            document.getElementById('btnClear').style.display = 'none';
+            document.getElementById('btnCopy').dataset.copyText = '';
         });
 
         async function fetchAutocomplete(query) {
