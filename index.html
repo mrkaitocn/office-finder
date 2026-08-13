@@ -86,9 +86,15 @@
             display: flex; flex-direction: column; gap: 20px;
             z-index: 1000;
             box-shadow: var(--shadow);
-            overflow-y: auto;
             transition: background 0.3s ease;
         }
+
+        .results-container {
+            display: flex; flex-direction: column; gap: 20px;
+            overflow-y: auto; flex: 1; padding-right: 4px;
+        }
+        .results-container::-webkit-scrollbar { width: 4px; }
+        .results-container::-webkit-scrollbar-thumb { background: var(--text-secondary); border-radius: 4px; }
 
         .header { display: flex; justify-content: space-between; align-items: flex-start; }
         .header-text h1 {
@@ -184,12 +190,7 @@
         }
         .btn-icon:hover { background: rgba(59, 130, 246, 0.1); }
 
-        .pulse-active { animation: pulse-green 1.5s infinite; background: rgba(16, 185, 129, 0.2); color: var(--accent); border-color: var(--accent); }
-        @keyframes pulse-green {
-            0% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.4); }
-            70% { box-shadow: 0 0 0 10px rgba(16, 185, 129, 0); }
-            100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
-        }
+        .btn-icon:hover { background: rgba(59, 130, 246, 0.1); }
 
         /* ===== RESULT CARDS ===== */
         .result-card {
@@ -338,37 +339,39 @@
             </div>
             <div class="buttons-row">
                 <button class="btn-primary" id="btnSearch">🔍 Tìm kiếm</button>
-                <button class="btn-icon" id="btnGPS" title="Sử dụng vị trí của tôi">🧭</button>
             </div>
         </div>
 
-        <!-- Kết quả: VP gần nhất tổng thể -->
-        <div class="result-card" id="nearestCard">
-            <div class="result-label nearest">📍 VP gần nhất</div>
-            <div class="office-name" id="nearestName">--</div>
-            <div class="office-address" id="nearestAddr">--</div>
-            <div class="stats-row">
-                <div class="stat-box"><div class="stat-value" id="nearestDist">0</div><div class="stat-label">km</div></div>
-                <div class="stat-box"><div class="stat-value" id="nearestTime">0</div><div class="stat-label">phút lái xe</div></div>
+        <!-- Kết quả -->
+        <div class="results-container">
+            <!-- Kết quả: VP gần nhất tổng thể -->
+            <div class="result-card" id="nearestCard">
+                <div class="result-label nearest">📍 VP gần nhất</div>
+                <div class="office-name" id="nearestName">--</div>
+                <div class="office-address" id="nearestAddr">--</div>
+                <div class="stats-row">
+                    <div class="stat-box"><div class="stat-value" id="nearestDist">0</div><div class="stat-label">km</div></div>
+                    <div class="stat-box"><div class="stat-value" id="nearestTime">0</div><div class="stat-label">phút lái xe</div></div>
+                </div>
+                <div class="route-steps" id="nearestStepsWrap" style="display:none">
+                    <div class="route-steps-title" data-target="nearestStepsList"><span class="arrow">▶</span> Chỉ dẫn đường đi</div>
+                    <div class="steps-list" id="nearestStepsList"></div>
+                </div>
             </div>
-            <div class="route-steps" id="nearestStepsWrap" style="display:none">
-                <div class="route-steps-title" data-target="nearestStepsList"><span class="arrow">▶</span> Chỉ dẫn đường đi</div>
-                <div class="steps-list" id="nearestStepsList"></div>
-            </div>
-        </div>
 
-        <!-- Kết quả: VP yêu thích gần nhất -->
-        <div class="result-card fav-card" id="favCard">
-            <div class="result-label favorite">⭐ VP yêu thích gần nhất</div>
-            <div class="office-name" id="favName">--</div>
-            <div class="office-address" id="favAddr">--</div>
-            <div class="stats-row">
-                <div class="stat-box"><div class="stat-value" id="favDist">0</div><div class="stat-label">km</div></div>
-                <div class="stat-box"><div class="stat-value" id="favTime">0</div><div class="stat-label">phút lái xe</div></div>
-            </div>
-            <div class="route-steps" id="favStepsWrap" style="display:none">
-                <div class="route-steps-title" data-target="favStepsList"><span class="arrow">▶</span> Chỉ dẫn đường đi</div>
-                <div class="steps-list" id="favStepsList"></div>
+            <!-- Kết quả: VP yêu thích gần nhất -->
+            <div class="result-card fav-card" id="favCard">
+                <div class="result-label favorite">⭐ VP yêu thích gần nhất</div>
+                <div class="office-name" id="favName">--</div>
+                <div class="office-address" id="favAddr">--</div>
+                <div class="stats-row">
+                    <div class="stat-box"><div class="stat-value" id="favDist">0</div><div class="stat-label">km</div></div>
+                    <div class="stat-box"><div class="stat-value" id="favTime">0</div><div class="stat-label">phút lái xe</div></div>
+                </div>
+                <div class="route-steps" id="favStepsWrap" style="display:none">
+                    <div class="route-steps-title" data-target="favStepsList"><span class="arrow">▶</span> Chỉ dẫn đường đi</div>
+                    <div class="steps-list" id="favStepsList"></div>
+                </div>
             </div>
         </div>
     </aside>
@@ -529,11 +532,14 @@
                 return label.includes('hà nội') || label.includes('ha noi') || label.includes('hanoi');
             });
             
-            const item = hanoiItem || data.items[0]; // Fallback lấy cái đầu tiên nếu không có HN
+            if (!hanoiItem) {
+                throw new Error("Chỉ hỗ trợ tìm kiếm các địa điểm trong khu vực Hà Nội.");
+            }
+            
             return { 
-                lat: item.position.lat, 
-                lng: item.position.lng,
-                address: item.address || null
+                lat: hanoiItem.position.lat, 
+                lng: hanoiItem.position.lng,
+                address: hanoiItem.address || null
             };
         }
 
@@ -766,23 +772,6 @@
         // Enter
         document.getElementById('addressInput').addEventListener('keypress', e => {
             if (e.key === 'Enter') { closeAutocomplete(); document.getElementById('btnSearch').click(); }
-        });
-
-        // GPS
-        document.getElementById('btnGPS').addEventListener('click', () => {
-            const btn = document.getElementById('btnGPS');
-            btn.classList.add('pulse-active');
-            if (!navigator.geolocation) { btn.classList.remove('pulse-active'); showToast("Trình duyệt không hỗ trợ Geolocation"); return; }
-            navigator.geolocation.getCurrentPosition(
-                async pos => {
-                    btn.classList.remove('pulse-active');
-                    const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-                    document.getElementById('addressInput').value = `Vị trí hiện tại (${coords.lat.toFixed(4)}, ${coords.lng.toFixed(4)})`;
-                    await findNearestOffice(coords);
-                },
-                err => { btn.classList.remove('pulse-active'); showToast(err.code === 1 ? "Bạn đã từ chối quyền truy cập vị trí" : "Lỗi lấy vị trí"); },
-                { enableHighAccuracy: true, timeout: 10000 }
-            );
         });
 
         /**
