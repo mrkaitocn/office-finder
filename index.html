@@ -508,7 +508,7 @@
          * Dùng khi user nhấn "Tìm kiếm" mà không chọn gợi ý từ dropdown
          */
         async function geocodeAddress(address) {
-            const url = `https://geocode.search.hereapi.com/v1/geocode?apiKey=${HERE_API_KEY}&q=${encodeURIComponent(address)}&at=21.0285,105.8542&in=countryCode:VNM&limit=1&lang=vi`;
+            const url = `https://geocode.search.hereapi.com/v1/geocode?apiKey=${HERE_API_KEY}&q=${encodeURIComponent(address)}&in=bbox:105.28,20.56,106.02,21.38&limit=1&lang=vi`;
             const res = await fetch(url);
             if (!res.ok) throw new Error("API Key HERE sai hoặc lỗi Geocoding");
             const data = await res.json();
@@ -887,7 +887,7 @@
 
         async function fetchAutocomplete(query) {
             try {
-                const url = `https://autocomplete.search.hereapi.com/v1/autocomplete?apiKey=${HERE_API_KEY}&q=${encodeURIComponent(query)}&at=21.0285,105.8542&in=countryCode:VNM&limit=7&lang=vi`;
+                const url = `https://autocomplete.search.hereapi.com/v1/autocomplete?apiKey=${HERE_API_KEY}&q=${encodeURIComponent(query)}&in=bbox:105.28,20.56,106.02,21.38&limit=7&lang=vi`;
                 const res = await fetch(url);
                 if (!res.ok) {
                     console.error(`HERE Autocomplete Error: ${res.status}`);
