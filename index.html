@@ -500,12 +500,13 @@
 
         /**
          * ==========================================
-         * 4. API (OPENROUTESERVICE)
+         * 4. API (HERE GEOCODING + ORS ROUTING)
          * ==========================================
          */
         /**
          * Geocode địa chỉ bằng HERE Geocode API
          * Dùng khi user nhấn "Tìm kiếm" mà không chọn gợi ý từ dropdown
+         * Endpoint /geocode hỗ trợ in=bbox nên dùng bbox để giới hạn Hà Nội
          */
         async function geocodeAddress(address) {
             const url = `https://geocode.search.hereapi.com/v1/geocode?apiKey=${HERE_API_KEY}&q=${encodeURIComponent(address)}&in=bbox:105.28,20.56,106.02,21.38&limit=1&lang=vi`;
@@ -513,8 +514,12 @@
             if (!res.ok) throw new Error("API Key HERE sai hoặc lỗi Geocoding");
             const data = await res.json();
             if (!data.items?.length) throw new Error("Không tìm thấy địa chỉ này");
-            const pos = data.items[0].position;
-            return { lat: pos.lat, lng: pos.lng };
+            const item = data.items[0];
+            return { 
+                lat: item.position.lat, 
+                lng: item.position.lng,
+                address: item.address || null
+            };
         }
 
         /**
@@ -730,8 +735,16 @@
             if (!address) { showToast("Vui lòng nhập địa chỉ"); return; }
             showLoading("Đang tìm tọa độ...");
             try {
-                const coords = await geocodeAddress(address);
-                await findNearestOffice(coords);
+                const result = await geocodeAddress(address);
+                
+                // Hiển thị địa chỉ đầy đủ + nút Copy (giống flow autocomplete)
+                const fullAddr = buildFullAddress(result.address);
+                if (fullAddr) {
+                    document.getElementById('addressInput').value = fullAddr;
+                    showCopyButton(fullAddr);
+                }
+
+                await findNearestOffice(result);
             } catch (err) { showToast(err.message); hideLoading(); }
         });
 
@@ -821,6 +834,7 @@
 
         /**
          * Xây dựng địa chỉ đầy đủ kiểu Google Maps
+         * Format: [số nhà] [đường], [phường], [quận], [thành phố] [mã bưu chính], [quốc gia]
          */
         function buildFullAddress(address) {
             if (!address) return '';
@@ -831,28 +845,25 @@
             let streetPart = '';
             if (address.houseNumber) streetPart += address.houseNumber;
             if (address.street) streetPart += (streetPart ? ' ' : '') + address.street;
-            
-            if (streetPart) {
-                parts.push(streetPart);
-            } else if (address.label) {
-                return address.label; // Fallback
-            }
+            if (streetPart) parts.push(streetPart);
 
-            if (address.subdistrict && parts.indexOf(address.subdistrict) === -1) parts.push(address.subdistrict);
-            if (address.district && parts.indexOf(address.district) === -1) parts.push(address.district);
+            // subdistrict (phường/xã)
+            if (address.subdistrict && address.subdistrict !== streetPart) parts.push(address.subdistrict);
+            // district (quận/huyện)
+            if (address.district && address.district !== streetPart) parts.push(address.district);
             
             // City + Postal code
             let cityPart = address.city || address.state || '';
             if (cityPart && address.postalCode) {
                 cityPart += ' ' + address.postalCode;
             }
-            if (cityPart && parts.indexOf(cityPart) === -1) {
-                parts.push(cityPart);
-            }
+            if (cityPart) parts.push(cityPart);
 
-            if (address.countryName && parts.indexOf(address.countryName) === -1) {
-                parts.push(address.countryName);
-            }
+            // Country
+            if (address.countryName) parts.push(address.countryName);
+
+            // Fallback: nếu không ghép được gì, dùng label gốc từ HERE
+            if (!parts.length && address.label) return address.label;
 
             return parts.join(', ');
         }
@@ -868,33 +879,61 @@
 
         document.getElementById('btnCopy').addEventListener('click', async (e) => {
             e.stopPropagation();
-            const text = e.currentTarget.dataset.copyText;
+            const btn = e.currentTarget;
+            const text = btn.dataset.copyText;
             if (!text) return;
             
+            let success = false;
             try {
+                // Ưu tiên Clipboard API (yêu cầu HTTPS hoặc localhost)
                 await navigator.clipboard.writeText(text);
-                e.currentTarget.textContent = '✅';
-                e.currentTarget.classList.add('copied');
+                success = true;
+            } catch (err) {
+                // Fallback cho file:// protocol hoặc trình duyệt cũ
+                try {
+                    const ta = document.createElement('textarea');
+                    ta.value = text;
+                    ta.style.cssText = 'position:fixed;left:-9999px;top:-9999px';
+                    document.body.appendChild(ta);
+                    ta.select();
+                    success = document.execCommand('copy');
+                    document.body.removeChild(ta);
+                } catch (e2) {
+                    console.error('Clipboard fallback failed', e2);
+                }
+            }
+
+            if (success) {
+                btn.textContent = '✅';
+                btn.classList.add('copied');
                 showToastSuccess('Đã sao chép địa chỉ!');
                 setTimeout(() => {
-                    e.currentTarget.textContent = '📋';
-                    e.currentTarget.classList.remove('copied');
+                    btn.textContent = '📋';
+                    btn.classList.remove('copied');
                 }, 2000);
-            } catch (err) {
-                console.error('Failed to copy', err);
             }
         });
 
         async function fetchAutocomplete(query) {
             try {
-                const url = `https://autocomplete.search.hereapi.com/v1/autocomplete?apiKey=${HERE_API_KEY}&q=${encodeURIComponent(query)}&in=bbox:105.28,20.56,106.02,21.38&limit=7&lang=vi`;
+                // Endpoint /autocomplete KHÔNG hỗ trợ in=bbox
+                // Dùng at (bias) + countryCode (filter) + client-side filter cho Hà Nội
+                const url = `https://autocomplete.search.hereapi.com/v1/autocomplete?apiKey=${HERE_API_KEY}&q=${encodeURIComponent(query)}&at=21.0285,105.8542&in=countryCode:VNM&limit=10&lang=vi`;
                 const res = await fetch(url);
                 if (!res.ok) {
                     console.error(`HERE Autocomplete Error: ${res.status}`);
                     return;
                 }
                 const data = await res.json();
-                renderAutocomplete(data.items || [], query);
+
+                // Client-side filter: chỉ giữ kết quả thuộc khu vực Hà Nội
+                const hanoiItems = (data.items || []).filter(item => {
+                    const addr = item.address || {};
+                    const city = (addr.city || addr.state || addr.county || '').toLowerCase();
+                    return city.includes('hà nội') || city.includes('ha noi') || city.includes('hanoi');
+                }).slice(0, 7); // Giới hạn 7 kết quả hiển thị
+
+                renderAutocomplete(hanoiItems, query);
             } catch (e) { console.error('Autocomplete Error:', e); }
         }
 
