@@ -509,12 +509,20 @@
          * Endpoint /geocode hỗ trợ in=bbox nên dùng bbox để giới hạn Hà Nội
          */
         async function geocodeAddress(address) {
-            const url = `https://geocode.search.hereapi.com/v1/geocode?apiKey=${HERE_API_KEY}&q=${encodeURIComponent(address)}&in=bbox:105.28,20.56,106.02,21.38&limit=1&lang=vi`;
+            // Geocode API KHÔNG hỗ trợ in=bbox, chỉ hỗ trợ in=countryCode
+            const url = `https://geocode.search.hereapi.com/v1/geocode?apiKey=${HERE_API_KEY}&q=${encodeURIComponent(address)}&in=countryCode:VNM&limit=5&lang=vi`;
             const res = await fetch(url);
             if (!res.ok) throw new Error("API Key HERE sai hoặc lỗi Geocoding");
             const data = await res.json();
             if (!data.items?.length) throw new Error("Không tìm thấy địa chỉ này");
-            const item = data.items[0];
+            
+            // Lọc ưu tiên kết quả ở Hà Nội
+            const hanoiItem = data.items.find(item => {
+                const label = (item.title || item.address?.label || '').toLowerCase();
+                return label.includes('hà nội') || label.includes('ha noi') || label.includes('hanoi');
+            });
+            
+            const item = hanoiItem || data.items[0]; // Fallback lấy cái đầu tiên nếu không có HN
             return { 
                 lat: item.position.lat, 
                 lng: item.position.lng,
@@ -916,25 +924,23 @@
 
         async function fetchAutocomplete(query) {
             try {
-                // Endpoint /autocomplete KHÔNG hỗ trợ in=bbox
-                // Dùng at (bias) + countryCode (filter) + client-side filter cho Hà Nội
-                const url = `https://autocomplete.search.hereapi.com/v1/autocomplete?apiKey=${HERE_API_KEY}&q=${encodeURIComponent(query)}&at=21.0285,105.8542&in=countryCode:VNM&limit=10&lang=vi`;
+                // Đổi sang autosuggest vì autocomplete không nhận diện tốt tiền tố "số", "ngõ"
+                const url = `https://autosuggest.search.hereapi.com/v1/autosuggest?apiKey=${HERE_API_KEY}&q=${encodeURIComponent(query)}&at=21.0285,105.8542&in=countryCode:VNM&limit=10&lang=vi`;
                 const res = await fetch(url);
                 if (!res.ok) {
-                    console.error(`HERE Autocomplete Error: ${res.status}`);
+                    console.error(`HERE Autosuggest Error: ${res.status}`);
                     return;
                 }
                 const data = await res.json();
 
                 // Client-side filter: chỉ giữ kết quả thuộc khu vực Hà Nội
                 const hanoiItems = (data.items || []).filter(item => {
-                    const addr = item.address || {};
-                    const city = (addr.city || addr.state || addr.county || '').toLowerCase();
-                    return city.includes('hà nội') || city.includes('ha noi') || city.includes('hanoi');
+                    const label = (item.title || item.address?.label || '').toLowerCase();
+                    return label.includes('hà nội') || label.includes('ha noi') || label.includes('hanoi');
                 }).slice(0, 7); // Giới hạn 7 kết quả hiển thị
 
                 renderAutocomplete(hanoiItems, query);
-            } catch (e) { console.error('Autocomplete Error:', e); }
+            } catch (e) { console.error('Autosuggest Error:', e); }
         }
 
         function renderAutocomplete(items, query) {
