@@ -114,13 +114,27 @@
         .input-wrapper { position: relative; z-index: 50; }
 
         input[type="text"] {
-            width: 100%; padding: 14px 16px;
+            width: 100%; padding: 14px 48px 14px 16px; /* padding-right 48px for copy button */
             border-radius: var(--radius); border: 1px solid var(--border-color);
             background: var(--bg-input); color: var(--text-primary);
             font-size: 15px; outline: none; transition: all 0.3s ease;
         }
         input[type="text"]:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.2); }
         input[type="text"]::placeholder { color: var(--text-secondary); }
+
+        /* Copy button inside input */
+        #btnCopy {
+            position: absolute; right: 8px; top: 50%;
+            transform: translateY(-50%);
+            background: var(--bg-card); border: 1px solid var(--border-color);
+            border-radius: 8px; width: 34px; height: 34px;
+            cursor: pointer; font-size: 16px;
+            display: none; align-items: center; justify-content: center;
+            transition: all 0.2s ease; color: var(--text-secondary);
+            z-index: 10;
+        }
+        #btnCopy:hover { background: rgba(59,130,246,0.15); color: var(--primary); }
+        #btnCopy.copied { background: rgba(16,185,129,0.15); color: var(--accent); }
 
         /* Autocomplete */
         #autocomplete-list {
@@ -312,6 +326,7 @@
         <div class="input-group">
             <div class="input-wrapper">
                 <input type="text" id="addressInput" placeholder="Nhập địa chỉ... (vd: Cầu Giấy, Hà Nội)" autocomplete="off">
+                <button id="btnCopy" title="Sao chép địa chỉ">📋</button>
                 <div id="autocomplete-list"></div>
             </div>
             <div class="buttons-row">
@@ -512,7 +527,11 @@
             if (!res.ok) throw new Error("Lỗi tra cứu vị trí");
             const data = await res.json();
             if (!data.position) throw new Error("Không tìm thấy tọa độ cho địa chỉ này");
-            return { lat: data.position.lat, lng: data.position.lng };
+            return { 
+                lat: data.position.lat, 
+                lng: data.position.lng,
+                address: data.address || null 
+            };
         }
 
         async function getDirections(start, end) {
@@ -749,6 +768,7 @@
 
         addressInput.addEventListener('input', () => {
             clearTimeout(acTimeout);
+            document.getElementById('btnCopy').style.display = 'none';
             const q = addressInput.value.trim();
             if (q.length < 2) { closeAutocomplete(); return; }
             // HERE API không bị rate limit nghiêm ngặt → debounce 250ms cho trải nghiệm mượt
@@ -799,6 +819,72 @@
             return icons[resultType] || '📍';
         }
 
+        /**
+         * Xây dựng địa chỉ đầy đủ kiểu Google Maps
+         */
+        function buildFullAddress(address) {
+            if (!address) return '';
+            
+            const parts = [];
+            
+            // houseNumber + street
+            let streetPart = '';
+            if (address.houseNumber) streetPart += address.houseNumber;
+            if (address.street) streetPart += (streetPart ? ' ' : '') + address.street;
+            
+            if (streetPart) {
+                parts.push(streetPart);
+            } else if (address.label) {
+                return address.label; // Fallback
+            }
+
+            if (address.subdistrict && parts.indexOf(address.subdistrict) === -1) parts.push(address.subdistrict);
+            if (address.district && parts.indexOf(address.district) === -1) parts.push(address.district);
+            
+            // City + Postal code
+            let cityPart = address.city || address.state || '';
+            if (cityPart && address.postalCode) {
+                cityPart += ' ' + address.postalCode;
+            }
+            if (cityPart && parts.indexOf(cityPart) === -1) {
+                parts.push(cityPart);
+            }
+
+            if (address.countryName && parts.indexOf(address.countryName) === -1) {
+                parts.push(address.countryName);
+            }
+
+            return parts.join(', ');
+        }
+
+        /**
+         * Hiển thị nút copy và xử lý sự kiện
+         */
+        function showCopyButton(text) {
+            const btn = document.getElementById('btnCopy');
+            btn.style.display = 'flex';
+            btn.dataset.copyText = text;
+        }
+
+        document.getElementById('btnCopy').addEventListener('click', async (e) => {
+            e.stopPropagation();
+            const text = e.currentTarget.dataset.copyText;
+            if (!text) return;
+            
+            try {
+                await navigator.clipboard.writeText(text);
+                e.currentTarget.textContent = '✅';
+                e.currentTarget.classList.add('copied');
+                showToastSuccess('Đã sao chép địa chỉ!');
+                setTimeout(() => {
+                    e.currentTarget.textContent = '📋';
+                    e.currentTarget.classList.remove('copied');
+                }, 2000);
+            } catch (err) {
+                console.error('Failed to copy', err);
+            }
+        });
+
         async function fetchAutocomplete(query) {
             try {
                 const url = `https://autocomplete.search.hereapi.com/v1/autocomplete?apiKey=${HERE_API_KEY}&q=${encodeURIComponent(query)}&at=21.0285,105.8542&in=countryCode:VNM&limit=7&lang=vi`;
@@ -836,14 +922,23 @@
                 el.innerHTML = `<div class="ac-icon">${icon}</div><div class="ac-text"><div class="ac-name">${displayName}</div><div class="ac-region">${displayRegion}</div></div>`;
 
                 el.addEventListener('click', async () => {
-                    addressInput.value = addr.label || title;
                     closeAutocomplete();
 
                     // HERE Autocomplete không trả tọa độ → cần gọi Lookup API
                     showLoading("Đang tra cứu vị trí...");
                     try {
-                        const coords = await hereLookup(item.id);
-                        await findNearestOffice(coords);
+                        const result = await hereLookup(item.id);
+                        
+                        // Xây dựng địa chỉ đầy đủ + hiển thị nút Copy
+                        const fullAddr = buildFullAddress(result.address);
+                        if (fullAddr) {
+                            addressInput.value = fullAddr;
+                            showCopyButton(fullAddr);
+                        } else {
+                            addressInput.value = addr.label || title;
+                        }
+
+                        await findNearestOffice(result);
                     } catch (err) {
                         showToast(err.message);
                         hideLoading();
@@ -864,8 +959,24 @@
          */
         let toastTimeout;
         function showToast(msg) {
-            const t = document.getElementById('toast'); t.textContent = msg; t.classList.add('show');
-            clearTimeout(toastTimeout); toastTimeout = setTimeout(() => t.classList.remove('show'), 3000);
+            const t = document.getElementById('toast'); 
+            t.textContent = msg; 
+            t.style.background = 'var(--danger)';
+            t.classList.add('show');
+            clearTimeout(toastTimeout); 
+            toastTimeout = setTimeout(() => t.classList.remove('show'), 3000);
+        }
+
+        function showToastSuccess(msg) {
+            const t = document.getElementById('toast');
+            t.textContent = msg;
+            t.style.background = 'var(--accent)';
+            t.classList.add('show');
+            clearTimeout(toastTimeout);
+            toastTimeout = setTimeout(() => {
+                t.classList.remove('show');
+                setTimeout(() => { t.style.background = 'var(--danger)'; }, 300); // reset after transition
+            }, 2000);
         }
         function showLoading(txt = "Đang xử lý...") { document.getElementById('loadingText').textContent = txt; document.getElementById('loading').style.display = 'flex'; }
         function hideLoading() { document.getElementById('loading').style.display = 'none'; }
